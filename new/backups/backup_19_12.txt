@@ -1,0 +1,840 @@
+install.packages('dplyr')
+install.packages('stargazer')
+install.packages("e1071")
+install.packages("ggplot2")
+install.packages("rstudioapi")
+install.packages('xlsx')
+install.packages("here")
+install.packages("tseries")
+install.packages("readxl")
+install.packages("lmtest")
+install.packages('igraph')
+install.packages("numbers")
+install.packages('rlist')
+install.packages('ggplot2')
+install.packages("Hmisc")
+install.packages("zoo")
+install.packages('moments')
+
+library(moments)
+library(dplyr)
+library(stargazer)
+library(e1071)
+library(ggplot2)
+library(rstudioapi)
+library(xlsx)
+library(here)
+library(tseries)
+library(readxl)
+library(lmtest)
+library(igraph)
+library(numbers)
+library(rlist)
+library(ggplot2)
+library(Hmisc)
+library(zoo)
+setwd(dirname(getActiveDocumentContext()$path))
+#GET DATA
+brokers <-read.csv('../shared/new/combined/brokers.csv')
+insurers<-read.csv('../shared/new/combined/insurers.csv')
+banks <-read.csv('../shared/new/combined/banks.csv')
+hf<-read.csv('../shared/new/combined/hf.csv')
+df<-read.csv('../shared/new/combined/combined.csv')
+df<-df %>%
+  rename(
+    dates=X
+  )
+df$dates<-as.Date(df$dates, "%d.%m.%Y")
+#DATA SUMMARY
+#J1994-1, j96-865, j99 - 2161, j02 - 3457, j06 - 5185,
+starts <- list(j94 = 1, j96 =865, j99=2161, j02=3457, j06=5185)
+mySummary<-function(vector, na.rm=FALSE){
+  return(c(summary(vector, digits=2), 'Std. Dev' = round(sd(vector, na.rm=TRUE), 2),
+           'Skew' = round(skewness(vector, na.rm=TRUE), 2),
+           'kurtosis' =round(kurtosis(vector, na.rm=TRUE), 2),
+           'autocorrelation' = round(acf(vector, na.action=na.pass)$acf[2], 2)))
+}
+produceSummary <- function (frame, title, output ){
+  #frame<-df #change the df to get new table
+  v<- 12*unname(unlist(frame[,2:ncol(frame)]))
+  repeatTimes <- 25*(nrow(frame))
+  brok <-rep(c('brokers'), repeatTimes)
+  insur<-rep(c('insurers'), repeatTimes)
+  bank<-rep(c('banks'), repeatTimes)
+  hedg<-rep(c('hedge funds'), repeatTimes)
+  classification<- c(brok, insur, bank, hedg)
+  s<-aggregate(v, list(classification), mySummary)
+  s<- cbind(s[-ncol(s)], s[[ncol(s)]])
+  #s<- aggregate(v, list(classification), mySummary)
+  #mat<-do.call("cbind", s[[2]])
+  names(s)[names(s) == 'Group.1'] <- 'type'
+  stargazer(s, digits = 2, summary=FALSE, rownames=FALSE, out=paste("images/", output, ".tex", sep=""), title = title)
+}
+produceSummary(df, "Full sample", "fullsample")
+produceSummary(df[starts$j94:(starts$j94+35),], "January 1994-December 1996", "j94")
+produceSummary(df[starts$j96:(starts$j96+35),], "January 1996-December 1998", "j96")
+produceSummary(df[starts$j99:(starts$j99+35),], "January 1999-December 2001", "j99")
+produceSummary(df[starts$j02:(starts$j02+35),], "January 2002-December 2004", "j02")
+produceSummary(df[starts$j06:(starts$j06+35),], "January 2006-December 2008", "j06")
+brokermeans <-c()
+insurermeans<-c()
+bankmeans<-c()
+hfmeans<-c()
+windowAve <- c()
+windowNames <-c()
+#as.Date(df[:, 1]
+for (i in seq(1,nrow(df), 36)){
+  frame<-df[i:(i+35), ]
+  windowAve <- c(windowAve, mean(unlist(frame[, 2:ncol(frame)])))
+  brokermeans<-c(brokermeans, mean(unlist(frame[,2:26])))
+  insurermeans<-c(insurermeans, mean(unlist(frame[, 27:51])))
+  bankmeans<-c(bankmeans, mean(unlist(frame[, 52:76])))
+  hfmeans<-c(hfmeans, mean(unlist(frame[, 77:101])))
+  windowNames<-c(windowNames, df[i+35,1] )
+}
+plot(as.Date(windowNames), windowAve, type='lines')
+lines(as.Date(windowNames), brokermeans, col='red')
+lines(as.Date(windowNames), insurermeans, col='blue')
+lines(as.Date(windowNames), hfmeans, col='grey')
+lines(as.Date(windowNames), bankmeans, col='brown')
+plot(as.Date(windowNames), windowAve, type='lines')
+#GARCH
+windowAve <- c()
+windowNames <-c()
+for (i in seq(1,nrow(df), 36)){
+  windowAve <- c(windowAve, mean(unlist(df[i:(i+35), 2:ncol(df) ])))
+  windowNames<-c(windowNames, df[i+35,1] )
+}
+#windowAve <-rowMeans(df[, 2:ncol(df)])
+sum(is.na(windowAve))
+#windowNames <-df[37:nrow(df), 1]
+#names(windowAve)<-windowNames
+mod<-garch(windowAve, order=c(1,1))
+summary(mod)
+plot(mod)
+plot(my.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1)', yaxt='n', xaxt='n' )
+axis.Date(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+#axis(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+axis(2, at=0)
+#GARCH on their sample
+modPartial<-garch(windowAve[1:145])
+my2.ts <- zoo(modPartial$fitted.values[,1]^2, as.Date(windowNames[1:145]))
+plot(my2.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1)', yaxt='n', xaxt='n' )
+axis.Date(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+axis(2,at=0)
+#Full Garch with no averaging
+windowAve <- c()
+windowNames <-c()
+for (i in seq(1,nrow(df), 36)){
+  windowAve <- c(windowAve, mean(unlist(df[i, 2:ncol(df) ])))
+  windowNames<-c(windowNames, df[i,1] )
+}
+mod<-garch(windowAve)
+my.ts <-zoo(mod$fitted.values[,1]^2, as.Date(windowNames))
+plot(my.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1) (1994-2015)', yaxt='n', xaxt='n' )
+axis.Date(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+#axis(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+axis(2, at=0)
+#garch on their sample with no averaging
+modPartial<-garch(windowAve[1:(145+24+12)])
+my2.ts <- zoo(modPartial$fitted.values[24:(145+24+12),1]^2, as.Date(windowNames[24:(145+24+12)]))
+plot(my2.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1) (1996-2008)', yaxt='n', xaxt='n' )
+axis.Date(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+axis(2,at=0)
+summary(modPartial)
+#with log transformation
+windowAve <- c()
+windowNames <-c()
+for (i in seq(1,nrow(df), 36)){
+  windowAve <- c(windowAve, mean(unlist(log(1+df[i, 2:ncol(df) ]))))
+  windowNames<-c(windowNames, df[i,1] )
+}
+modPartial<-garch(windowAve[1:(145+24+12)])
+summary(modPartial)
+my2.ts <- zoo(modPartial$fitted.values[24:(145+24+12),1]^2, as.Date(windowNames[24:(145+24+12)]))
+plot(my2.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1) with log transformation (1996-2008)', yaxt='n', xaxt='n' )
+#PCA
+nonNans <- c()
+firsts<-c()
+twoToTen<-c()
+elevenToTwenty<-c()
+rest<-c()
+for(i in seq(1,nrow(df), 36)) {
+  pca <- df[i:(i+35),2:ncol(df)]
+  pca<-pca[,colSums(is.na(pca))==0]
+  print(i)
+  nonNans<-c(nonNans, length(pca))
+  pca.pca<-prcomp(pca, center=TRUE, scale.=TRUE)
+  x<-cumsum(pca.pca$sdev^2/sum(pca.pca$sdev^2))
+  firsts<-c(firsts, x[1])
+  twoToTen<-c(twoToTen, x[10]-x[1])
+  elevenToTwenty<-c(elevenToTwenty, x[20]-x[10])
+  rest<-c(rest, x[36]-x[20])
+}
+plot(df$dates[seq(36, nrow(df), 36)], firsts, type='lines')
+pca<-data.frame('dates'= df$dates[seq(36, nrow(df), 36)], "PC1"= firsts, "PC2"=twoToTen+firsts, "PC11_20" = elevenToTwenty+twoToTen+firsts, "PC21_36" = elevenToTwenty+twoToTen+firsts+rest )
+plot(pca$dates, pca$PC1, type='l', ylim=range(c(0,1)), xlab='', ylab = 'proportion explained', main = 'PCA component proportion explained')
+lines(pca$dates, pca$PC2, col='red')
+lines(pca$dates, pca$PC11_20, col='blue')
+legend('bottomright', c('PC1', 'PC2-10', 'PC11-20'), lty=1, col=c('black', 'red', 'blue'), bty='n', cex=.75)
+#GRANGER CAUSALITY
+#startIndex = 1+36*12
+startIndex = 1
+endIndex = startIndex+35
+brokers_shared <- df[startIndex:endIndex, c(1,2:26)]
+ins_shared <- df[startIndex:endIndex, c(1,27:51)]
+banks_shared <- df[startIndex:endIndex, c(1,52:76)]
+hf_shared <- df[startIndex:endIndex, c(1,77:101)]
+merged <- merge(merge(merge(brokers_shared, ins_shared), banks_shared), hf_shared)
+grangerDF<- data.frame(matrix(nrow=ncol(merged)-1, ncol = ncol(merged)-1)) #this frame indicates whether two variables granger cause each other
+rownames(grangerDF)<-colnames(merged)[2:ncol(merged)]
+colnames(grangerDF)<-colnames(merged)[2:ncol(merged)]
+for (i in 2:ncol(merged)){
+  for (j in 2:ncol(merged)) {
+    if(i!=j) {
+      x<-merged[1:nrow(merged), i]
+      y<-merged[1:nrow(merged), j]
+      granger <-grangertest(x, y,order=1)
+      p_value<-granger$`Pr(>F)`[2] #null is that there is no causality. So if p-value is small we get causality.
+      grangerDF[i-1,j-1] = p_value
+    }
+  }
+  print(i)
+}
+sum(grangerDF<0.05, na.rm=TRUE)
+significance = 0.05 #change this to change significance level
+nInSample  = 25 #CHANGE THIS LINE (SHOULD EQUAL NUMBER OF INSTITUTIONS IN THE GROUP)
+groupVector  = vector(length = nInSample*4)
+for (i in 0:(nInSample*4-1)) {
+  groupVector[i+1] = as.integer(i/nInSample)+1
+}
+mergedTemp <- (grangerDF<significance)*1 #matrix(sample(0:1, (nInSample*4)^2, replace=TRUE, prob=c(0.9,0.1)), nc=nInSample*4) #CHANGE THIS LINE FOR MY DATAFRAME
+print(mergedTemp)
+g1<-graph_from_adjacency_matrix(mergedTemp)
+G_Grouped = g1
+E(G_Grouped)$weight = 1
+for(i in unique(groupVector)) {
+  GroupV = which(groupVector == i)
+  G_Grouped = add_edges(G_Grouped, combn(GroupV, 2), attr=list(weight=5))
+}
+#set.seed(567)
+LO = layout_with_fr(G_Grouped)
+plot.igraph(g1,  vertex.color = rainbow(4, alpha=0.4)[groupVector], layout=LO, vertex.label=NA, vertex.size=5,arrow.size=0.01, arrow.width=0.1, curved=TRUE, edge.arrow.size=0.3)
+legend('topleft', c('broker', 'insurer', 'bank', 'hedge fund'), lty=1, col=rainbow(4, alpha=0.4), bty='n', cex=.75, pch=15)
+#write.csv( grangerDF, "temp/graph06.csv")
+saveLayout <- LO
+
+
+
+
+
+
+#SEE HOW COMPOSITION CHANGES
+getEntities <- function (path) {
+  path<-  '../shared/hf_result.xlsx'
+  res <-matrix(nrow = 0, ncol=26)
+  for (i in 1:(length(excel_sheets(path)))){
+    if(mod(i,10)==0){
+      print(i)
+    }
+    res<-rbind(res,names(read_excel(path, sheet = i)))
+  }
+  return (res)
+}
+
+hfComp<- getEntities("../shared/hf_result.xlsx")
+brokerComp<-getEntities("../shared/PB_Monthly_Rolling_Large_Returns_3_years.xls")
+banksComp<-getEntities("../shared/BA_Monthly_Rolling_Large_Returns_3_years.xls")
+insurerComp<-getEntities("../shared/INS_Monthly_Rolling_Large_Returns_3_years.xls")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#HERE TRIED TO RECOVER OLD CODE
+
+
+#granger causality simulation
+startIndex <-1
+forGranger <- df[startIndex:(startIndex+35), 2:ncol(df)]
+m <-matrix(, nrow=100, ncol = 100)
+data.matrix(forGranger)
+epsilons<-rnorm(36, mean=0, sd=1)
+x<1+epsilons
+x<-1+epsilons
+y<-epsilons2
+epsilons2<-rnorm(36, mean=0, sd=1)
+y<-epsilons2
+lag(x)
+View(merged)
+#efficient granger calculation
+
+x<-merged[1:nrow(merged), i]
+y<-merged[1:nrow(merged), j]
+granger <-grangertest(x, y,order=1)
+p_value<-granger$`Pr(>F)`[2] #null is that there is no causality. So if p-value is small we get causality.
+proc.time()-ptm
+ptm <-proc.time()
+for (i in 2:ncol(merged)){
+  for (j in 2:ncol(merged)) {
+    if(i!=j) {
+      x<-merged[1:nrow(merged), i]
+      y<-merged[1:nrow(merged), j]
+      granger <-grangertest(x, y,order=1)
+      p_value<-granger$`Pr(>F)`[2] #null is that there is no causality. So if p-value is small we get causality.
+      grangerDF[i-1,j-1] = p_value
+    }
+  }
+  print(i)
+}
+
+
+
+proc.time()-ptm
+correctFrame<-grangerDF
+efficientFrame <-data.matrix(merged)
+View(efficientFrame)
+efficientFrame<-efficientFrame[, 2:ncol(efficientFrame)]
+View(efficientFrame)
+efficientFrame <-data.matrix(merged)
+efficientFrame<-t(efficientFrame[, 2:ncol(efficientFrame)])
+View(efficientFrame)
+maxCol <-ncol(efficientFrame)
+efficientFrame<-rbind(1, efficientFrame)
+View(efficientFrame)
+efficientFrame <-data.matrix(merged)
+efficientFrame<-t(efficientFrame[, 2:ncol(efficientFrame)])
+efficientFrame<-rbind(efficientFrame, 1)
+y <-efficientFrame[c(i,j), 2:maxCol]
+z<-efficientFrame[c(101, i,j), 1:(maxCol-1)]
+y %*% t(z)
+install.packages("matlib")
+library(matlib)
+y %*% t(z) * inv((z%*%t(z)))
+y %*% t(z) %*% inv((z%*%t(z)))
+y %*% t(z) %*% inv(z%*%t(z))
+z%*%t(z)
+y <-efficientFrame[c(i,j), 2:maxCol]
+z<-efficientFrame[c(101, i,j), 1:(maxCol-1)]
+maxCol <-ncol(efficientFrame)
+i<-1
+j<-2
+y <-efficientFrame[c(i,j), 2:maxCol]
+z<-efficientFrame[c(101, i,j), 1:(maxCol-1)]
+efficientFrame <-data.matrix(merged)
+efficientFrame<-t(efficientFrame[, 2:ncol(efficientFrame)])
+efficientFrame<-rbind(efficientFrame, 1)
+maxCol <-ncol(efficientFrame)
+View(efficientFrame)
+maxCol <-nrow(efficientFrame)
+i<-1
+j<-2
+y <-efficientFrame[c(i,j), 2:maxCol]
+z<-efficientFrame[c(101, i,j), 1:(maxCol-1)]
+y %*% t(z) %*% inv(z%*%t(z))
+(y %*% t(z) %*% inv(z%*%t(z)))[:, 2]
+(y %*% t(z) %*% inv(z%*%t(z)))[, 2]
+efficientFrame <-data.matrix(merged)
+maxCols <- ncol(efficientFrame)
+maxRows <-nrow(efficientFrame)
+ptm <-proc.time()
+ptm <-proc.time()
+for (i in 2:maxCols) {
+  for (j in (i+1):maxCols){
+    grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])
+    grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])
+  }
+}
+ptm <-proc.time()
+for (i in 2:maxCols) {
+  for (j in (i+1):maxCols){
+    grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+    grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+  }
+}
+proc.time()-ptm
+View(efficientFrame)
+#i<-1
+#j<-2
+#y <-efficientFrame[c(i,j), 2:maxCol]
+#z<-efficientFrame[c(101, i,j), 1:(maxCol-1)]
+#(y %*% t(z) %*% inv(z%*%t(z)))[, 2]
+getGraph <- function (grangerDF) {
+  significance = 0.05 #change this to change significance level
+  nInSample  = 25 #CHANGE THIS LINE (SHOULD EQUAL NUMBER OF INSTITUTIONS IN THE GROUP)
+  groupVector  = vector(length = nInSample*4)
+  for (i in 0:(nInSample*4-1)) {
+    groupVector[i+1] = as.integer(i/nInSample)+1
+  }
+  mergedTemp <- (grangerDF<significance)*1 #matrix(sample(0:1, (nInSample*4)^2, replace=TRUE, prob=c(0.9,0.1)), nc=nInSample*4) #CHANGE THIS LINE FOR MY DATAFRAME
+  g1<-graph_from_adjacency_matrix(mergedTemp)
+  G_Grouped = g1
+  E(G_Grouped)$weight = 1
+  for(i in unique(groupVector)) {
+    GroupV = which(groupVector == i)
+    G_Grouped = add_edges(G_Grouped, combn(GroupV, 2), attr=list(weight=5))
+  }
+  plot.igraph(g1,  vertex.color = rainbow(4, alpha=0.4)[groupVector], layout=saveLayout, vertex.label=NA, vertex.size=5,arrow.size=0.01, arrow.width=0.1, curved=TRUE, edge.arrow.size=0.3)
+  legend('topleft', c('broker', 'insurer', 'bank', 'hedge fund'), lty=1, col=rainbow(4, alpha=0.4), bty='n', cex=.75, pch=15)
+}
+getGraph (grangerDF)
+saveLayout <- LO
+#set.seed(567)
+LO = layout_with_fr(G_Grouped)
+saveLayout <- LO
+getGraph (grangerDF)
+View(grangerDF)
+test<-grangertest(efficientFrame[, i], efficientFrame[,j])
+test<-grangertest(efficientFrame[, 1], efficientFrame[,2])
+View(test)
+read.csv('new/temp/graph06.csv')
+read.csv('temp/graph06.csv')
+getGraph((grang06))
+grang06 <-read.csv('temp/graph06.csv')
+getGraph((grang06))
+View(grang06)
+grang06 <-read.csv('temp/graph06.csv', header = TRUE)
+View(grang06)
+grang06 <-grang06[, 2:ncol(grang06)]
+getGraph((grang06))
+getFrame<-function(startIndex){
+  endIndex = startIndex+35
+  brokers_shared <- df[startIndex:endIndex, c(1,2:26)]
+  ins_shared <- df[startIndex:endIndex, c(1,27:51)]
+  banks_shared <- df[startIndex:endIndex, c(1,52:76)]
+  hf_shared <- df[startIndex:endIndex, c(1,77:101)]
+  merged <- merge(merge(merge(brokers_shared, ins_shared), banks_shared), hf_shared)
+  return (merged)
+}
+getGranger(merged){
+  grangerDF<-matrix(nrow=ncol(merged)-1, ncol = ncol(merged)-1) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 2:maxCols) {
+    for (j in (i+1):maxCols){
+      grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+  }
+  return (grangerDF)
+}
+fr<-getFrame(1)
+View(df)
+getFrame(1)
+getFrame<-function(startIndex){
+  endIndex = startIndex+35
+  brokers_shared <- df[startIndex:endIndex, c(1,2:26)]
+  ins_shared <- df[startIndex:endIndex, c(1,27:51)]
+  banks_shared <- df[startIndex:endIndex, c(1,52:76)]
+  hf_shared <- df[startIndex:endIndex, c(1,77:101)]
+  merged <- merge(merge(merge(brokers_shared, ins_shared), banks_shared), hf_shared)
+  return (merged)
+}
+getFrame(1)
+getGranger(merged){
+  grangerDF<-matrix(nrow=ncol(merged)-1, ncol = ncol(merged)-1) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 2:maxCols) {
+    for (j in (i+1):maxCols){
+      grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  return (grangerDF)
+}
+View(fr)
+View(fr)
+View(fr)
+View(fr)
+View(fr)
+View(fr)
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged)-1, ncol = ncol(merged)-1) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 2:maxCols) {
+    for (j in (i+1):maxCols){
+      grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  return (grangerDF)
+}
+fr
+fr[:, 2]
+fr[, 2]
+garch(fr[, 2])
+fr[, 2]
+garch(fr[, 2], order=c(1,1))
+str(fr[, 2])
+summary(fr[,2])
+g <- garch(fr[, 2], order=c(1,1))
+g
+g$fitted.values
+g$fitted.values[, 1]
+getGarch <- function (col) {
+  return(garch(col, order=c(1,1))$fitted.vales[,1])
+}
+apply (fr[,2:ncol(fr)], 2, getGarch)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+getGarch(fr[:, 2])
+getGarch(fr[, 2])
+g<-getGarch(fr[, 2])
+getGarch <- function (col) {
+  g<-garch(col, order=c(1,1))
+  return(g$fitted.vales[,1])
+}
+g<-getGarch(fr[, 2])
+g<-grach(fr[,2], order=c(1,1))
+g<-garch(fr[,2], order=c(1,1))
+getGarch <- function (col) {
+  g<-garch(col, order=c(1,1))
+  return(g$fitted.values[,1])
+}
+g<-garch(fr[,2], order=c(1,1))
+View(g)
+g<-getGarch(fr[, 2])
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+View(variances)
+View(fr)
+View(variances)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances
+View(adjFr)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+View(adjFr)
+getFrame<-function(startIndex){
+  endIndex = startIndex+35
+  brokers_shared <- df[startIndex:endIndex, c(1,2:26)]
+  ins_shared <- df[startIndex:endIndex, c(1,27:51)]
+  banks_shared <- df[startIndex:endIndex, c(1,52:76)]
+  hf_shared <- df[startIndex:endIndex, c(1,77:101)]
+  merged <- merge(merge(merge(brokers_shared, ins_shared), banks_shared), hf_shared)
+  print(1)
+  return (merged)
+}
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged)-1, ncol = ncol(merged)-1) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 2:maxCols) {
+    for (j in (i+1):maxCols){
+      grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  return (grangerDF)
+}
+getGarch <- function (col) {
+  g<-garch(col, order=c(1,1))
+  return(g$fitted.values[,1])
+}
+getGraph <- function (grangerDF) {
+  significance = 0.05 #change this to change significance level
+  nInSample  = 25 #CHANGE THIS LINE (SHOULD EQUAL NUMBER OF INSTITUTIONS IN THE GROUP)
+  groupVector  = vector(length = nInSample*4)
+  for (i in 0:(nInSample*4-1)) {
+    groupVector[i+1] = as.integer(i/nInSample)+1
+  }
+  mergedTemp <- (grangerDF<significance)*1 #matrix(sample(0:1, (nInSample*4)^2, replace=TRUE, prob=c(0.9,0.1)), nc=nInSample*4) #CHANGE THIS LINE FOR MY DATAFRAME
+  g1<-graph_from_adjacency_matrix(mergedTemp)
+  G_Grouped = g1
+  E(G_Grouped)$weight = 1
+  for(i in unique(groupVector)) {
+    GroupV = which(groupVector == i)
+    G_Grouped = add_edges(G_Grouped, combn(GroupV, 2), attr=list(weight=5))
+  }
+  plot.igraph(g1,  vertex.color = rainbow(4, alpha=0.4)[groupVector], layout=saveLayout, vertex.label=NA, vertex.size=5,arrow.size=0.01, arrow.width=0.1, curved=TRUE, edge.arrow.size=0.3)
+  legend('topleft', c('broker', 'insurer', 'bank', 'hedge fund'), lty=1, col=rainbow(4, alpha=0.4), bty='n', cex=.75, pch=15)
+}
+fr<-getFrame(1)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+granger<getGranger(adjFr)
+getGraph(granger)
+fr<-getFrame(1+36*12)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+granger<getGranger(adjFr)
+getGraph(granger)
+View(adjFr)
+getGranger(adjFr)
+View(efficientFrame)
+View(adjFr)
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged), ncol = ncol(merged)) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 2:maxCols) {
+    for (j in (i+1):maxCols){
+      grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  return (grangerDF)
+}
+getGranger(adjFr)
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged), ncol = ncol(merged)) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 2:(maxCols-1)) {
+    for (j in (i+1):maxCols){
+      grangerDF[i-1, j-1]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j-1, i-1]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  return (grangerDF)
+}
+granger<getGranger(adjFr)
+View(granger)
+View(merged)
+View(adjFr)
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged), ncol = ncol(merged)) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 1:(maxCols-1)) {
+    for (j in (i+1):maxCols){
+      grangerDF[i, j]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j, i]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  print(grangerDF)
+  return (grangerDF)
+}
+granger<getGranger(adjFr)
+grangerDF<-0
+granger<getGranger(adjFr)
+#granger<getGranger(adjFr)
+getGranger(adjFr)
+merged<-adjFr
+grangerDF<-matrix(nrow=ncol(merged), ncol = ncol(merged)) #this frame indicates whether two variables granger cause each other
+efficientFrame <-data.matrix(merged)
+maxCols <- ncol(efficientFrame)
+maxRows <-nrow(efficientFrame)
+for (i in 1:(maxCols-1)) {
+  for (j in (i+1):maxCols){
+    grangerDF[i, j]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+    grangerDF[j, i]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+  }
+  print(i)
+}
+View(grangerDF)
+granger<<-grangerDF
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged), ncol = ncol(merged)) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 1:(maxCols-1)) {
+    for (j in (i+1):maxCols){
+      grangerDF[i, j]=grangertest(efficientFrame[, i], efficientFrame[,j])$`Pr(>F)`[2]
+      grangerDF[j, i]=grangertest(efficientFrame[,j], efficientFrame[, i])$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  granger<<-grangerDF
+}
+#granger<getGranger(adjFr)
+getGranger(adjFr)
+getGraph(granger)
+plot()
+plot(c(1:100), c(2:101))
+fr<-getFrame(1)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+merged<-adjFr
+granger<getGranger(adjFr)
+getGraph(granger)
+fr<-getFrame(1+36*12)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+merged<-adjFr
+#granger<getGranger(adjFr)
+getGranger(adjFr)
+getGraph(granger)
+View(fr)
+View(brokers_shared)
+getGranger <-function(merged){
+  grangerDF<-matrix(nrow=ncol(merged), ncol = ncol(merged)) #this frame indicates whether two variables granger cause each other
+  efficientFrame <-data.matrix(merged)
+  maxCols <- ncol(efficientFrame)
+  maxRows <-nrow(efficientFrame)
+  for (i in 1:(maxCols-1)) {
+    for (j in (i+1):maxCols){
+      grangerDF[i, j]=grangertest(efficientFrame[, i], efficientFrame[,j], order = 3)$`Pr(>F)`[2]
+      grangerDF[j, i]=grangertest(efficientFrame[,j], efficientFrame[, i], order = 3)$`Pr(>F)`[2]
+    }
+    print(i)
+  }
+  granger<<-grangerDF
+}
+plot(c(1:100), c(2:101))
+fr<-getFrame(1)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+merged<-adjFr
+granger<getGranger(adjFr)
+getGraph(granger)
+fr<-getFrame(1+36*12)
+variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+merged<-adjFr
+#granger<getGranger(adjFr)
+getGranger(adjFr)
+getGraph(granger)
+seq(1,252,4)
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res <- c(res, list(i=i))
+}
+res
+View(res)
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res <- c(res, i=i)
+}
+res
+df[, 1]
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res[[df[i,1]]] = c([df[i,1]], i)
+}
+for (i in seq(1, 252, 7)) {
+  res[[df[i,1]]] = c(df[i,1]], i)
+}
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res[[df[i,1]]] = c(df[[i,1]], i)
+}
+View(res)
+res <- c()
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res[[df[i,1]]] = c(df[[i,1]], i)
+}
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res[[i]] = c(res[[i]], i)
+}
+res <- c()
+for (i in seq(1, 252, 7)) {
+  res[["a"]] = c(res[["a"]], i)
+}
+res <- list()
+for (i in seq(1, 252, 7)) {
+  res[["a"]] = c(res[["a"]], i)
+}
+View(res)
+res <- list()
+for (i in seq(1, 252, 7)) {
+  res[[df[i, 1]]] = c(res[[df[i,1]]], i)
+}
+length(df)
+View(df)
+res <- list()
+for (i in seq(1, 252, 7)) {
+  index = 1+36*(i-1)
+  res[[df[index, 1]]] = c(res[[df[index,1]]], i)
+}
+dres <c()
+res <- c()
+for (i in seq(1, 252, 7)) {
+  index = 1+36*(i-1)
+  dates <-c(dates, df[index, 1])
+  res<-c(res, i)
+}
+dres <c()
+res <- c()
+for (i in seq(1, 252, 7)) {
+  index = 1+36*(i-1)
+  dres <-c(dates, df[index, 1])
+  res<-c(res, i)
+}
+dres <c()
+res <- c()
+for (i in seq(1, 252, 7)) {
+  index = 1+36*(i-1)
+  dres <-c(dres, df[index, 1])
+  res<-c(res, i)
+}
+dres <c()
+res <- c()
+dres <-c(dres, df[index, 1])
+dres <c()
+dres <-c()
+res <- c()
+for (i in seq(1, 252, 7)) {
+  index = 1+36*(i-1)
+  dres <-c(dres, df[index, 1])
+  res<-c(res, i)
+}
+plot(dres, res)
+plot(as.Date(dres), res)
+granger
+sum(granger)
+sum(granger<0.05, na.rm=TRUE)
+sum(granger<0.05, na.rm=TRUE)/4950
+dres <-c()
+res <- c()
+for (i in seq(1, 252, 7)) {
+  index = 1+36*(i-1)
+  dres <-c(dres, df[index, 1])
+  fr<-getFrame(i)
+  variances <-apply (fr[,2:ncol(fr)], 2, getGarch)
+  adjFr <- fr[2:nrow(fr), 2:ncol(fr)]/variances[2:nrow(variances), ]
+  merged<-adjFr
+  getGranger(adjFr)
+  res<-c(res, sum(granger<0.05, na.rm=TRUE)/4950)
+  print(sum(granger<0.05, na.rm=TRUE)/4950 )
+  print(i)
+}
+res
+length(res)
+plot(as.Date(dres), res)
+dres
+length(dres)
+length(res)
+plot(as.Date(dres[1:length(dres)-1]), res

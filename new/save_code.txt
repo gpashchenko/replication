@@ -1,0 +1,134 @@
+
+library(dplyr)
+library(stargazer)
+library(e1071)
+library(ggplot2)
+library(rstudioapi)
+library(xlsx)
+library(here)
+library(tseries)
+library(readxl)
+library(lmtest)
+library(igraph)
+library(numbers)
+library(rlist)
+library(ggplot2)
+library(Hmisc)
+library(zoo)
+
+setwd(dirname(getActiveDocumentContext()$path))
+
+
+#GET DATA
+brokers <-read.csv('../shared/new/combined/brokers.csv')
+insurers<-read.csv('../shared/new/combined/insurers.csv')
+banks <-read.csv('../shared/new/combined/banks.csv')
+hf<-read.csv('../shared/new/combined/hf.csv')
+df<-read.csv('../shared/new/combined/combined.csv')
+df<-df %>% 
+  rename(
+    dates=X
+  )
+df$dates<-as.Date(df$dates, "%d.%m.%Y")
+
+
+
+
+
+
+
+#DATA SUMMARY
+#J1994-1, j96-865, j99 - 2161, j02 - 3457, j06 - 5185,
+starts <- list(j94 = 1, j96 =865, j99=2161, j02=3457, j06=5185)
+
+mySummary<-function(vector, na.rm=FALSE){
+  return(c(summary(vector, digits=2), 'Std. Dev' = round(sd(vector, na.rm=TRUE), 2), 
+           'Skew' = round(skewness(vector, na.rm=TRUE), 2), 
+           'kurtosis' =round(kurtosis(vector, na.rm=TRUE), 2),
+           'autocorrelation' = round(acf(vector, na.action=na.pass)$acf[2], 2)))
+}
+
+produceSummary <- function (frame, title, output ){
+#frame<-df #change the df to get new table
+v<- 12*unname(unlist(frame[,2:ncol(frame)]))
+repeatTimes <- 25*(nrow(frame))
+brok <-rep(c('brokers'), repeatTimes)
+insur<-rep(c('insurers'), repeatTimes)
+bank<-rep(c('banks'), repeatTimes)
+hedg<-rep(c('hedge funds'), repeatTimes)
+classification<- c(brok, insur, bank, hedg)
+s<-aggregate(v, list(classification), mySummary)
+s<- cbind(s[-ncol(s)], s[[ncol(s)]])
+#s<- aggregate(v, list(classification), mySummary)
+#mat<-do.call("cbind", s[[2]])
+names(s)[names(s) == 'Group.1'] <- 'type'
+stargazer(s, digits = 2, summary=FALSE, rownames=FALSE, out=paste("images/", output, ".tex", sep=""), title = title)
+}
+produceSummary(df, "Full sample", "fullsample")
+produceSummary(df[starts$j94:(starts$j94+35),], "January 1994-December 1996", "j94")
+produceSummary(df[starts$j96:(starts$j96+35),], "January 1996-December 1998", "j96")
+produceSummary(df[starts$j99:(starts$j99+35),], "January 1999-December 2001", "j99")
+produceSummary(df[starts$j02:(starts$j02+35),], "January 2002-December 2004", "j02")
+produceSummary(df[starts$j06:(starts$j06+35),], "January 2006-December 2008", "j06")
+
+brokermeans <-c()
+insurermeans<-c()
+bankmeans<-c()
+hfmeans<-c()
+windowAve <- c()
+windowNames <-c()
+for (i in seq(1,nrow(df), 36)){
+  frame<-df[i:(i+35), ]
+  windowAve <- c(windowAve, mean(unlist(frame[, 2:ncol(frame)])))
+  brokermeans<-c(brokermeans, mean(unlist(frame[,2:26])))
+  insurermeans<-c(insurermeans, mean(unlist(frame[, 27:51])))
+  bankmeans<-c(bankmeans, mean(unlist(frame[, 52:76])))
+  hfmeans<-c(hfmeans, mean(unlist(frame[, 77:101])))
+  windowNames<-c(windowNames, df[i+35,1] )
+}
+plot(as.Date(windowNames), windowAve, type='lines')
+lines(as.Date(windowNames), brokermeans, col='red')
+lines(as.Date(windowNames), insurermeans, col='blue')
+lines(as.Date(windowNames), hfmeans, col='grey')
+lines(as.Date(windowNames), bankmeans, col='brown')
+
+plot(as.Date(windowNames), windowAve, type='lines')
+
+#GARCH
+windowAve <- c()
+windowNames <-c()
+for (i in seq(1,nrow(df), 36)){
+  windowAve <- c(windowAve, mean(unlist(df[i:(i+35), 2:ncol(df) ])))
+  windowNames<-c(windowNames, df[i+35,1] )
+}
+
+#windowAve <-rowMeans(df[, 2:ncol(df)])
+sum(is.na(windowAve))
+#windowNames <-df[37:nrow(df), 1]
+
+#names(windowAve)<-windowNames
+mod<-garch(windowAve, order=c(1,1))
+summary(mod)
+plot(mod)
+#plot(zoo(windowAve, as.Date(windowNames)))
+
+my.ts <-zoo(mod$fitted.values[,1]^2, as.Date(windowNames))
+
+plot(my.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1)', yaxt='n', xaxt='n' )
+axis.Date(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+#axis(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+axis(2, at=0)
+
+#GARCH on their sample 
+modPartial<-garch(windowAve[1:145])
+my2.ts <- zoo(modPartial$fitted.values[,1]^2, as.Date(windowNames[1:145]))
+plot(my2.ts, type='lines', xlab='year', ylab='variance', main='Variance from GARCH(1,1)', yaxt='n', xaxt='n' )
+axis.Date(1, at=seq(as.Date("1994/1/1"), as.Date("2018/1/1"), by = "year"))
+axis(2,at=0)
+
+x<-1:100
+y<-runif(100,-2,2)
+
+plot(x,y,bty="n",xaxt="n",yaxt="n")
+axis(side=1,at=seq(0,100,25),lwd=3)
+axis(side=2,at=seq(-2,2,2),lwd=3)
